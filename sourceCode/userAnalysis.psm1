@@ -1,3 +1,16 @@
+function Get-LoggedInUsers {
+    $userRegPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI\UserTile'
+    $users = Get-ChildItem -Path $userRegPath | ForEach-Object {
+        $user = $_.GetValue('LogonSid')
+        $displayName = $_.GetValue('DisplayName')
+        [PSCustomObject]@{
+            SID = $user
+            DisplayName = $displayName
+        }
+    }
+    return $users
+}
+
 function Get-UserProfileInfo {
     param (
         [Parameter(Mandatory=$true)]
@@ -88,4 +101,3 @@ function Select-User {
 
 # Exporting functions to module
 Export-ModuleMember -Function Get-LoggedInUsers, Get-UserProfileInfo, Get-UserNetworkConnections, Get-UserSoftwareSettings, Get-UserRecentDocs, Get-UserInformation, Select-User
-

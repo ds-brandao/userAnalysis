@@ -1,3 +1,10 @@
+function Get-CurrentLoggedInUser {
+    $wmiQuery = "SELECT * FROM Win32_ComputerSystem"
+    $computerSystem = Get-WmiObject -Query $wmiQuery
+    $currentLoggedInUser = $computerSystem.UserName
+    return $currentLoggedInUser
+}
+
 function Get-LoggedInUsers {
     $userRegPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
     $users = Get-ChildItem -Path $userRegPath | ForEach-Object {
@@ -108,34 +115,28 @@ function Get-UserInformation {
     $userInfo = [PSCustomObject]@{
         ProfileInfo = Get-UserProfileInfo -UserSID $UserSID
         Networks = Get-UserNetworkConnections -UserSID $UserSID
+        SoftwareSettings = Get-UserSoftwareSettings -UserSID $UserSID
+        RecentDocs = Get-UserRecentDocs -UserSID $UserSID
         # SoftwareSettings and RecentDocs are large, so summarized here
-        SoftwareSettings = "Software settings found under HKU:\$UserSID\Software"
-        RecentDocs = "Recent documents found under HKU:\$UserSID\Software\Microsoft\Windows\CurrentVersion\Explorer\RecentDocs"
+        #SoftwareSettings = "Software settings found under HKU:\$UserSID\Software"
+        #RecentDocs = "Recent documents found under HKU:\$UserSID\Software\Microsoft\Windows\CurrentVersion\Explorer\RecentDocs"
     }
     return $userInfo
 }
 
 function Select-User {
+    $currentLoggedInUser = Get-CurrentLoggedInUser
     $users = Get-LoggedInUsers
-    if ($users.Count -eq 0) {
-        Write-Host "No users found."
+    $selectedUser = $users | Where-Object { $_.DisplayName -eq $currentLoggedInUser }
+
+    if ($null -eq $selectedUser) {
+        Write-Host "No users found or current user not found in registry."
         return
     }
 
-    Write-Host "Select a User:"
-    for ($i = 0; $i -lt $users.Count; $i++) {
-        Write-Host "$($i + 1). $($users[$i].DisplayName)"
-    }
-
-    $selection = Read-Host "Enter the number of the user you want to select"
-    if ($selection -match '^\d+$' -and $selection -ge 1 -and $selection -le $users.Count) {
-        $selectedUser = $users[$selection - 1]
-        $userInfo = Get-UserInformation -UserSID $selectedUser.SID
-        $userInfo | Format-List
-    } else {
-        Write-Host "Invalid selection. No user selected."
-    }
+    $userInfo = Get-UserInformation -UserSID $selectedUser.SID
+    $userInfo | Format-List
 }
 
 # Exporting functions to module
-Export-ModuleMember -Function Get-LoggedInUsers, Get-UserProfileInfo, Get-UserNetworkConnections, Get-UserSoftwareSettings, Get-UserRecentDocs, Get-UserInformation, Select-User
+Export-ModuleMember -Function Get-CurrentLoggedInUser, Get-LoggedInUsers, Get-UserProfileInfo, Get-UserNetworkConnections, Get-UserSoftwareSettings, Get-UserRecentDocs, Get-UserInformation, Select-User

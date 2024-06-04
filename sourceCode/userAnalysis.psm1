@@ -37,6 +37,21 @@ function Get-UserProfileInfo {
             2048 { "Other" }
             Default { "Unknown" }
         }
+        EmailAddress = (Get-ItemProperty -Path "HKU:\$UserSID\Software\Microsoft\Windows\CurrentVersion\AccountPicture" -Name "UserEmailAddress" -ErrorAction SilentlyContinue).UserEmailAddress
+        AccountPicture = (Get-ItemProperty -Path "HKU:\$UserSID\Software\Microsoft\Windows\CurrentVersion\AccountPicture" -Name "Image" -ErrorAction SilentlyContinue).Image
+    }
+}
+
+function Get-UserLogonInfo {
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$UserSID
+    )
+    $userAccount = Get-WmiObject -Class Win32_UserAccount -Filter "SID='$UserSID'"
+    [PSCustomObject]@{
+        LastLogon = $userAccount.LastLogon
+        LogonCount = $userAccount.LogonCount
+        PasswordLastSet = $userAccount.PasswordLastSet
     }
 }
 
@@ -67,24 +82,23 @@ function Get-UserNetworkConnections {
     return $networks
 }
 
-function Get-UserSoftwareSettings {
+function Get-UserInstalledPrograms {
     param (
         [Parameter(Mandatory=$true)]
         [string]$UserSID
     )
-    # Mount HKU if not already mounted
-    if (-not (Get-PSDrive -Name HKU -ErrorAction SilentlyContinue)) {
-        New-PSDrive -Name HKU -PSProvider Registry -Root HKEY_USERS
-    }
-
-    $softwareRegPath = "HKU:\$UserSID\Software"
-    $softwareSettings = Get-ChildItem -Path $softwareRegPath -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
-        [PSCustomObject]@{
-            Path = $_.PSPath
-            Value = $_.GetValue("") -as [string]
+    $uninstallRegPath = "HKU:\$UserSID\Software\Microsoft\Windows\CurrentVersion\Uninstall"
+    $installedPrograms = Get-ChildItem -Path $uninstallRegPath -ErrorAction SilentlyContinue | ForEach-Object {
+        $programName = $_.GetValue("DisplayName")
+        $programVersion = $_.GetValue("DisplayVersion")
+        if ($programName) {
+            [PSCustomObject]@{
+                Name = $programName
+                Version = $programVersion
+            }
         }
     }
-    return $softwareSettings
+    return $installedPrograms
 }
 
 function Get-UserRecentDocs {
@@ -92,11 +106,6 @@ function Get-UserRecentDocs {
         [Parameter(Mandatory=$true)]
         [string]$UserSID
     )
-    # Mount HKU if not already mounted
-    if (-not (Get-PSDrive -Name HKU -ErrorAction SilentlyContinue)) {
-        New-PSDrive -Name HKU -PSProvider Registry -Root HKEY_USERS
-    }
-
     $recentDocsRegPath = "HKU:\$UserSID\Software\Microsoft\Windows\CurrentVersion\Explorer\RecentDocs"
     $recentDocs = Get-ChildItem -Path $recentDocsRegPath -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
         [PSCustomObject]@{
@@ -107,6 +116,79 @@ function Get-UserRecentDocs {
     return $recentDocs
 }
 
+function Get-UserRecentFiles {
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$UserSID
+    )
+    $recentFilesRegPath = "HKU:\$UserSID\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\OpenSavePidlMRU"
+    $recentFiles = Get-ChildItem -Path $recentFilesRegPath -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+        [PSCustomObject]@{
+            Path = $_.PSPath
+            Value = $_.GetValue("") -as [string]
+        }
+    }
+    return $recentFiles
+}
+
+function Get-UserNetworkUsage {
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$UserSID
+    )
+    $networkAdapters = Get-NetAdapterStatistics
+    $networkUsage = $networkAdapters | ForEach-Object {
+        [PSCustomObject]@{
+            Name = $_.Name
+            BytesSent = $_.BytesSent
+            BytesReceived = $_.BytesReceived
+        }
+    }
+    return $networkUsage
+}
+
+function Get-UserConnectedDevices {
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$UserSID
+    )
+    $connectedDevices = Get-WmiObject -Class Win32_USBControllerDevice -Namespace root\cimv2 | ForEach-Object {
+        [PSCustomObject]@{
+            Name = $_.Name
+            Description = $_.Description
+        }
+    }
+    return $connectedDevices
+}
+
+function Get-UserPrinterConnections {
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$UserSID
+    )
+    $printerConnections = Get-WmiObject -Class Win32_Printer -Namespace root\cimv2 | ForEach-Object {
+        [PSCustomObject]@{
+            Name = $_.Name
+            PortName = $_.PortName
+        }
+    }
+    return $printerConnections
+}
+
+function Get-UserScheduledTasks {
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$UserSID
+    )
+    $scheduledTasks = Get-ScheduledTask | Where-Object { $_.Principal.UserId -eq $UserSID } | ForEach-Object {
+        [PSCustomObject]@{
+            TaskName = $_.TaskName
+            TaskPath = $_.TaskPath
+        }
+    }
+    return $scheduledTasks
+}
+
 function Get-UserInformation {
     param (
         [Parameter(Mandatory=$true)]
@@ -114,12 +196,15 @@ function Get-UserInformation {
     )
     $userInfo = [PSCustomObject]@{
         ProfileInfo = Get-UserProfileInfo -UserSID $UserSID
+        LogonInfo = Get-UserLogonInfo -UserSID $UserSID
         Networks = Get-UserNetworkConnections -UserSID $UserSID
-        SoftwareSettings = Get-UserSoftwareSettings -UserSID $UserSID
+        InstalledPrograms = Get-UserInstalledPrograms -UserSID $UserSID
         RecentDocs = Get-UserRecentDocs -UserSID $UserSID
-        # SoftwareSettings and RecentDocs are large, so summarized here
-        #SoftwareSettings = "Software settings found under HKU:\$UserSID\Software"
-        #RecentDocs = "Recent documents found under HKU:\$UserSID\Software\Microsoft\Windows\CurrentVersion\Explorer\RecentDocs"
+        RecentFiles = Get-UserRecentFiles -UserSID $UserSID
+        NetworkUsage = Get-UserNetworkUsage -UserSID $UserSID
+        ConnectedDevices = Get-UserConnectedDevices -UserSID $UserSID
+        PrinterConnections = Get-UserPrinterConnections -UserSID $UserSID
+        ScheduledTasks = Get-UserScheduledTasks -UserSID $UserSID
     }
     return $userInfo
 }
@@ -139,4 +224,4 @@ function Select-User {
 }
 
 # Exporting functions to module
-Export-ModuleMember -Function Get-CurrentLoggedInUser, Get-LoggedInUsers, Get-UserProfileInfo, Get-UserNetworkConnections, Get-UserSoftwareSettings, Get-UserRecentDocs, Get-UserInformation, Select-User
+Export-ModuleMember -Function Get-CurrentLoggedInUser, Get-LoggedInUsers, Get-UserProfileInfo, Get-UserLogonInfo, Get-UserNetworkConnections, Get-UserInstalledPrograms, Get-UserRecentDocs, Get-UserRecentFiles, Get-UserNetworkUsage, Get-UserConnectedDevices, Get-UserPrinterConnections, Get-UserScheduledTasks, Get-UserInformation, Select-User

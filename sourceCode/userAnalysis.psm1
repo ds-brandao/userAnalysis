@@ -37,8 +37,8 @@ function Get-UserProfileInfo {
             2048 { "Other" }
             Default { "Unknown" }
         }
-        EmailAddress = (Get-ItemProperty -Path "HKU:\$UserSID\Software\Microsoft\Windows\CurrentVersion\AccountPicture" -Name "UserEmailAddress" -ErrorAction SilentlyContinue).UserEmailAddress
-        AccountPicture = (Get-ItemProperty -Path "HKU:\$UserSID\Software\Microsoft\Windows\CurrentVersion\AccountPicture" -Name "Image" -ErrorAction SilentlyContinue).Image
+        EmailAddress = (Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\AccountPicture" -Name "UserEmailAddress" -ErrorAction SilentlyContinue).UserEmailAddress
+        AccountPicture = (Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\AccountPicture" -Name "Image" -ErrorAction SilentlyContinue).Image
     }
 }
 
@@ -67,6 +67,7 @@ function Get-UserNetworkConnections {
         $profilePath = Join-Path -Path $networkRegPath -ChildPath $profileGuid
         $userProfile = Get-ItemProperty -Path $profilePath
         $ssid = (Get-ItemProperty -Path "$ssidPath\$profileGuid" -ErrorAction SilentlyContinue).DefaultGatewayMac
+        $lastConnectTime = $userProfile.LastConnectTime
         [PSCustomObject]@{
             ProfileName = $userProfile.ProfileName
             NetworkCategory = switch ($userProfile.Category) {
@@ -77,6 +78,7 @@ function Get-UserNetworkConnections {
             }
             Description = $userProfile.Description
             SSID = if ($ssid) { $ssid } else { "N/A" }
+            LastConnectTime = if ($lastConnectTime) { [datetime]::FromFileTime($lastConnectTime) } else { "N/A" }
         }
     }
     return $networks
@@ -87,14 +89,18 @@ function Get-UserInstalledPrograms {
         [Parameter(Mandatory=$true)]
         [string]$UserSID
     )
-    $uninstallRegPath = "HKU:\$UserSID\Software\Microsoft\Windows\CurrentVersion\Uninstall"
+    $uninstallRegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall"
     $installedPrograms = Get-ChildItem -Path $uninstallRegPath -ErrorAction SilentlyContinue | ForEach-Object {
         $programName = $_.GetValue("DisplayName")
         $programVersion = $_.GetValue("DisplayVersion")
+        $installDate = $_.GetValue("InstallDate")
+        $uninstallDate = $_.GetValue("UninstallDate")
         if ($programName) {
             [PSCustomObject]@{
                 Name = $programName
                 Version = $programVersion
+                InstallDate = if ($installDate) { [datetime]::FromFileTime($installDate) } else { "N/A" }
+                UninstallDate = if ($uninstallDate) { [datetime]::FromFileTime($uninstallDate) } else { "N/A" }
             }
         }
     }
@@ -106,11 +112,13 @@ function Get-UserRecentDocs {
         [Parameter(Mandatory=$true)]
         [string]$UserSID
     )
-    $recentDocsRegPath = "HKU:\$UserSID\Software\Microsoft\Windows\CurrentVersion\Explorer\RecentDocs"
+    $recentDocsRegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\RecentDocs"
     $recentDocs = Get-ChildItem -Path $recentDocsRegPath -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+        $file = Get-Item -Path $_.GetValue("") -ErrorAction SilentlyContinue
         [PSCustomObject]@{
             Path = $_.PSPath
             Value = $_.GetValue("") -as [string]
+            LastAccessTime = if ($file) { $file.LastAccessTime } else { "N/A" }
         }
     }
     return $recentDocs
@@ -121,11 +129,13 @@ function Get-UserRecentFiles {
         [Parameter(Mandatory=$true)]
         [string]$UserSID
     )
-    $recentFilesRegPath = "HKU:\$UserSID\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\OpenSavePidlMRU"
+    $recentFilesRegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\OpenSavePidlMRU"
     $recentFiles = Get-ChildItem -Path $recentFilesRegPath -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+        $file = Get-Item -Path $_.GetValue("") -ErrorAction SilentlyContinue
         [PSCustomObject]@{
             Path = $_.PSPath
             Value = $_.GetValue("") -as [string]
+            LastAccessTime = if ($file) { $file.LastAccessTime } else { "N/A" }
         }
     }
     return $recentFiles
@@ -205,6 +215,7 @@ function Get-UserInformation {
         ConnectedDevices = Get-UserConnectedDevices -UserSID $UserSID
         PrinterConnections = Get-UserPrinterConnections -UserSID $UserSID
         ScheduledTasks = Get-UserScheduledTasks -UserSID $UserSID
+        RunOnce = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce"
     }
     return $userInfo
 }
